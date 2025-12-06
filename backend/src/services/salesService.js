@@ -1,133 +1,141 @@
-import { findAllSales } from "../models/saleModel.js";
+import { streamSalesRows } from "../utils/loadData.js";
 
-const applySearch = (data, search) => {
-  if (!search) return data;
-  const term = search.toLowerCase();
-  return data.filter((item) => {
-    const name = (item.customerName || "").toLowerCase();
-    const phone = (item.phoneNumber || "").toLowerCase();
-    return name.includes(term) || phone.includes(term);
-  });
+const stringIncludes = (value, search) => {
+  if (!search) return true;
+  if (!value) return false;
+  return value.toString().toLowerCase().includes(search.toLowerCase());
 };
 
-const applyFilters = (data, filters) => {
-  return data.filter((item) => {
-    if (filters.customerRegions?.length) {
-      if (!filters.customerRegions.includes(item.customerRegion)) return false;
-    }
+const applyFilters = (row, search, filters) => {
+  // Search on name or phone
+  if (search) {
+    const matchName = stringIncludes(row.customerName, search);
+    const matchPhone = stringIncludes(row.phoneNumber, search);
+    if (!matchName && !matchPhone) return false;
+  }
 
-    if (filters.genders?.length) {
-      if (!filters.genders.includes(item.gender)) return false;
-    }
+  // Region
+  if (filters.customerRegions?.length) {
+    const v = (row.customerRegion || "").toLowerCase();
+    const allowed = filters.customerRegions.map((r) => r.toLowerCase());
+    if (!allowed.includes(v)) return false;
+  }
 
-    if (filters.ageMin !== null || filters.ageMax !== null) {
-      const age = item.age;
-      if (age === null) return false;
+  // Gender
+  if (filters.genders?.length) {
+    const v = (row.gender || "").toLowerCase();
+    const allowed = filters.genders.map((r) => r.toLowerCase());
+    if (!allowed.includes(v)) return false;
+  }
 
-      if (filters.ageMin !== null && age < filters.ageMin) return false;
-      if (filters.ageMax !== null && age > filters.ageMax) return false;
-    }
+  // Age range
+  if (filters.ageMin !== undefined && filters.ageMin !== "") {
+    if (row.age == null || row.age < filters.ageMin) return false;
+  }
+  if (filters.ageMax !== undefined && filters.ageMax !== "") {
+    if (row.age == null || row.age > filters.ageMax) return false;
+  }
 
-    if (filters.productCategories?.length) {
-      if (!filters.productCategories.includes(item.productCategory))
-        return false;
-    }
+  // Product category
+  if (filters.productCategories?.length) {
+    const v = (row.productCategory || "").toLowerCase();
+    const allowed = filters.productCategories.map((r) => r.toLowerCase());
+    if (!allowed.includes(v)) return false;
+  }
 
-    if (filters.tags?.length) {
-      const itemTags = item.tags || [];
-      const hasMatch = filters.tags.some((tag) => itemTags.includes(tag));
-      if (!hasMatch) return false;
-    }
+  // Tags (any tag must match)
+  if (filters.tags?.length) {
+    const wanted = filters.tags.map((t) => t.toLowerCase());
+    const rowTags = (row.tags || []).map((t) => t.toLowerCase());
+    const has = wanted.some((t) => rowTags.includes(t));
+    if (!has) return false;
+  }
 
-      if (filters.paymentMethods?.length) {
-      const itemValue = (item.paymentMethod || "").toLowerCase();
-      const allowed = filters.paymentMethods.map((v) => v.toLowerCase());
-      const matches = allowed.some((v) => itemValue.includes(v));
-      if (!matches) return false;
-    }
+  // Payment method (case-insensitive, tolerant)
+  if (filters.paymentMethods?.length) {
+    const itemValue = (row.paymentMethod || "").toLowerCase();
+    const allowed = filters.paymentMethods.map((v) => v.toLowerCase());
+    const matches = allowed.some((v) => itemValue.includes(v));
+    if (!matches) return false;
+  }
 
+  // Date range
+  if (filters.dateFrom) {
+    const from = new Date(filters.dateFrom);
+    if (!row.date || row.date < from) return false;
+  }
+  if (filters.dateTo) {
+    const to = new Date(filters.dateTo);
+    if (!row.date || row.date > to) return false;
+  }
 
-    if (filters.dateFrom || filters.dateTo) {
-      if (!item.date) return false;
-      const time = item.date.getTime();
-
-      if (filters.dateFrom) {
-        const fromTime = filters.dateFrom.getTime();
-        if (time < fromTime) return false;
-      }
-      if (filters.dateTo) {
-        const toTime = filters.dateTo.getTime();
-        if (time > toTime) return false;
-      }
-    }
-
-    return true;
-  });
+  return true;
 };
 
-const applySorting = (data, sortBy, sortOrder) => {
-  if (!sortBy) return data;
+const baseCompare = (a, b, sortBy) => {
+  if (sortBy === "customerName") {
+    const av = (a.customerName || "").toLowerCase();
+    const bv = (b.customerName || "").toLowerCase();
+    return av.localeCompare(bv);
+  }
 
-  const dir = sortOrder === "asc" ? 1 : -1;
-  const sorted = [...data];
+  if (sortBy === "quantity") {
+    const av = a.quantity || 0;
+    const bv = b.quantity || 0;
+    return av - bv;
+  }
 
-  sorted.sort((a, b) => {
-    let va;
-    let vb;
+  // default: date
+  if (sortBy === "date") {
+    const av = a.date ? a.date.getTime() : 0;
+    const bv = b.date ? b.date.getTime() : 0;
+    return av - bv;
+  }
 
-    if (sortBy === "date") {
-      va = a.date ? a.date.getTime() : 0;
-      vb = b.date ? b.date.getTime() : 0;
-    } else if (sortBy === "quantity") {
-      va = a.quantity || 0;
-      vb = b.quantity || 0;
-    } else if (sortBy === "customerName") {
-      va = (a.customerName || "").toLowerCase();
-      vb = (b.customerName || "").toLowerCase();
-    } else {
-      return 0;
-    }
-
-    if (va < vb) return -1 * dir;
-    if (va > vb) return 1 * dir;
-    return 0;
-  });
-
-  return sorted;
+  return 0;
 };
 
-const applyPagination = (data, page, pageSize) => {
-  const total = data.length;
-  const totalPages = Math.ceil(total / pageSize) || 1;
+export const fetchSales = async ({
+  search,
+  sortBy,
+  sortOrder,
+  page,
+  pageSize,
+  filters,
+}) => {
+  const maxItems = page * pageSize; // we only keep top N for requested page
+  const buffer = [];
+  let totalMatches = 0;
 
-  const safePage = Math.min(Math.max(page, 1), totalPages);
-  const start = (safePage - 1) * pageSize;
-  const end = start + pageSize;
+  const cmpAsc = (a, b) => baseCompare(a, b, sortBy);
+  const compare =
+    sortOrder === "asc" ? cmpAsc : (a, b) => -cmpAsc(a, b);
 
-  const pageData = data.slice(start, end);
+  await streamSalesRows((row) => {
+    if (!applyFilters(row, search, filters)) return;
+
+    totalMatches += 1;
+
+    buffer.push(row);
+    buffer.sort(compare); // buffer is small (maxItems), so this is fine
+
+    if (buffer.length > maxItems) {
+      // drop the worst one (last) according to current sort order
+      buffer.pop();
+    }
+  });
+
+  const totalPages = Math.max(1, Math.ceil(totalMatches / pageSize));
+
+  // buffer now has top (page * pageSize) rows in correct order
+  const startIndex = Math.max(0, (page - 1) * pageSize);
+  const data = buffer.slice(startIndex, startIndex + pageSize);
 
   return {
-    data: pageData,
-    total,
-    page: safePage,
+    page,
     pageSize,
+    total: totalMatches,
     totalPages,
+    data,
   };
-};
-
-export const getSales = ({
-  search,
-  filters,
-  sortBy,
-  sortOrder = "desc",
-  page = 1,
-  pageSize = 10,
-}) => {
-  let data = findAllSales();
-
-  data = applySearch(data, search);
-  data = applyFilters(data, filters);
-  data = applySorting(data, sortBy, sortOrder);
-
-  return applyPagination(data, page, pageSize);
 };

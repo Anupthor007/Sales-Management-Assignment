@@ -6,8 +6,6 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-let salesData = [];
-
 // Map CSV row -> normalized JS object
 const normalizeRow = (row) => {
   return {
@@ -24,8 +22,6 @@ const normalizeRow = (row) => {
     productName: row["Product Name"],
     brand: row["Brand"],
     productCategory: row["Product Category"],
-
-    // "smart,wireless" -> ["smart", "wireless"]
     tags: row["Tags"]
       ? row["Tags"].split(",").map((t) => t.trim()).filter(Boolean)
       : [],
@@ -49,12 +45,17 @@ const normalizeRow = (row) => {
   };
 };
 
-export const loadSalesData = async () => {
+// Very simple CSV splitter (works as long as your data doesn't use commas inside quotes)
+const splitCsvLine = (line) => {
+  return line.split(",").map((s) => s.trim());
+};
+
+// Stream all rows and call `onRow` for each normalized row
+export const streamSalesRows = async (onRow) => {
   const csvPath = path.join(__dirname, "..", "..", "data", "sales.csv");
 
   if (!fs.existsSync(csvPath)) {
     console.error("❌ sales.csv not found at:", csvPath);
-    salesData = [];
     return;
   }
 
@@ -66,27 +67,23 @@ export const loadSalesData = async () => {
 
   let headers = [];
   let isFirstLine = true;
-  salesData = [];
 
   for await (const line of rl) {
     if (!line.trim()) continue;
 
     if (isFirstLine) {
-      headers = line.split(",").map((h) => h.trim());
+      headers = splitCsvLine(line);
       isFirstLine = false;
       continue;
     }
 
-    const values = line.split(",");
+    const values = splitCsvLine(line);
     const rowObj = {};
     headers.forEach((header, idx) => {
-      rowObj[header] = (values[idx] ?? "").trim(); // <-- trim values
+      rowObj[header] = (values[idx] ?? "").trim();
     });
 
-    salesData.push(normalizeRow(rowObj));
+    const row = normalizeRow(rowObj);
+    onRow(row);
   }
-
-  console.log(`✅ Loaded ${salesData.length} sales records from CSV`);
 };
-
-export const getSalesData = () => salesData;

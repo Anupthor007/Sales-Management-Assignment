@@ -1,13 +1,21 @@
-import { getSales } from "../services/salesService.js";
+import { fetchSales } from "../services/salesService.js";
 
-export const getSalesHandler = (req, res, next) => {
+const parseList = (val) => {
+  if (!val) return [];
+  return String(val)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+};
+
+export const getSales = async (req, res) => {
   try {
     const {
       search = "",
+      sortBy = "date",
+      sortOrder = "desc",
       page = "1",
       pageSize = "10",
-      sortBy = "",
-      sortOrder = "",
       customerRegions,
       genders,
       productCategories,
@@ -19,46 +27,30 @@ export const getSalesHandler = (req, res, next) => {
       dateTo,
     } = req.query;
 
-    const parseList = (value) =>
-      value ? value.split(",").map((v) => v.trim()).filter(Boolean) : [];
-
     const filters = {
       customerRegions: parseList(customerRegions),
       genders: parseList(genders),
       productCategories: parseList(productCategories),
       tags: parseList(tags),
       paymentMethods: parseList(paymentMethods),
-      ageMin: ageMin ? Number(ageMin) : null,
-      ageMax: ageMax ? Number(ageMax) : null,
-      dateFrom: dateFrom ? new Date(dateFrom) : null,
-      dateTo: dateTo ? new Date(dateTo) : null,
+      ageMin: ageMin ? Number(ageMin) : undefined,
+      ageMax: ageMax ? Number(ageMax) : undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
     };
 
-    if (
-      filters.ageMin !== null &&
-      filters.ageMax !== null &&
-      filters.ageMin > filters.ageMax
-    ) {
-      return res.json({
-        data: [],
-        total: 0,
-        page: 1,
-        pageSize: Number(pageSize) || 10,
-        totalPages: 1,
-      });
-    }
-
-    const response = getSales({
+    const result = await fetchSales({
       search,
-      filters,
       sortBy,
-      sortOrder: sortOrder || (sortBy === "date" ? "desc" : "asc"),
+      sortOrder,
       page: Number(page) || 1,
       pageSize: Number(pageSize) || 10,
+      filters,
     });
 
-    res.json(response);
+    res.json(result);
   } catch (err) {
-    next(err);
+    console.error("Error in getSales:", err);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
