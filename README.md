@@ -91,14 +91,16 @@ This allows smooth navigation without heavy memory usage.
 
 ## 7. Setup Instructions
 
-### **Backend Setup**
+### **Backend & Frontend Setup**
+
 
 ```bash
 cd backend
 npm install
 npm start
 
-### **Frontend Setup**
+
+
 cd frontend
 npm install
 npm run dev
